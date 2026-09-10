@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>¿Dónde fue tomada?</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.js"></script>
+<style>
+  :root{
+    --ink:#1b2420;
+    --paper:#f4efe2;
+    --paper-dim:#e9e1cd;
+    --brass:#a9762f;
+    --brass-deep:#7c541c;
+    --pine:#2f4a3d;
+    --pine-deep:#1c2f27;
+    --red-pin:#a13a2f;
+    --line: rgba(27,36,32,0.18);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--pine-deep);
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(169,118,47,0.10), transparent 40%),
+      radial-gradient(circle at 85% 90%, rgba(169,118,47,0.08), transparent 45%);
+    color:var(--paper);
+    font-family: 'Iowan Old Style','Palatino Linotype', Georgia, serif;
+    min-height:100vh;
+  }
+  .sans{ font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+
+  header{
+    padding: 28px 24px 18px;
+    text-align:center;
+    border-bottom:1px solid rgba(244,239,226,0.15);
+  }
+  header h1{
+    margin:0;
+    font-weight:600;
+    font-size: clamp(24px, 4vw, 34px);
+    letter-spacing:0.3px;
+    color:var(--paper);
+  }
+  header p{
+    margin:8px auto 0;
+    max-width: 520px;
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size:14px;
+    color: rgba(244,239,226,0.65);
+  }
+
+  .stage{
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  /* Upload screen */
+  .dropzone{
+    max-width: 620px;
+    margin: 60px auto;
+    padding: 48px 32px;
+    border: 1px solid rgba(244,239,226,0.3);
+    background: rgba(244,239,226,0.03);
+    text-align:center;
+    border-radius: 2px;
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .dropzone.drag{
+    border-color: var(--brass);
+    background: rgba(169,118,47,0.08);
+  }
+  .dropzone p.hint{
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    color: rgba(244,239,226,0.55);
+    margin-top: 14px;
+  }
+  .btn{
+    display:inline-block;
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing:0.2px;
+    color: var(--pine-deep);
+    background: var(--brass);
+    border: none;
+    padding: 12px 26px;
+    border-radius: 2px;
+    cursor:pointer;
+    margin-top: 18px;
+  }
+  .btn:hover{ background:#bd873f; }
+  .btn.ghost{
+    background:transparent;
+    color: var(--paper);
+    border:1px solid rgba(244,239,226,0.4);
+  }
+  .btn.ghost:hover{ border-color: var(--brass); color:var(--brass); }
+  .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  .error-msg{
+    color:#e2a08a;
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    margin-top: 14px;
+  }
+
+  /* Game screen */
+  .game-grid{
+    display:grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 20px;
+    align-items:start;
+  }
+  @media (max-width: 860px){
+    .game-grid{ grid-template-columns: 1fr; }
+  }
+
+  .panel{
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 3px;
+    overflow:hidden;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+  }
+  .photo-panel img{
+    width:100%;
+    display:block;
+    max-height: 62vh;
+    object-fit: contain;
+    background:#0f1613;
+  }
+  .panel-label{
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    padding: 10px 14px;
+    color: rgba(27,36,32,0.55);
+    border-bottom: 1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+  }
+  #map{
+    height: 62vh;
+    width:100%;
+  }
+
+  .action-row{
+    max-width: 1180px;
+    margin: 18px auto 0;
+    padding: 0 24px;
+    display:flex;
+    justify-content: space-between;
+    align-items:center;
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+  .coord-readout{
+    font-size: 13px;
+    color: rgba(244,239,226,0.6);
+  }
+  .coord-readout b{ color: var(--brass); font-weight:600; }
+
+  /* Result overlay */
+  .result-wrap{
+    max-width: 620px;
+    margin: 34px auto 0;
+    padding: 26px 30px;
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 3px;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+    text-align:center;
+  }
+  .score-big{
+    font-size: 64px;
+    font-weight: 700;
+    color: var(--pine);
+    line-height:1;
+    margin: 4px 0 2px;
+  }
+  .score-label{
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 12px;
+    letter-spacing:0.08em;
+    color: rgba(27,36,32,0.5);
+  }
+  .distance-line{
+    margin-top: 14px;
+    font-size: 19px;
+  }
+  .distance-line b{ color: var(--brass-deep); }
+  .verdict{
+    margin-top: 6px;
+    font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    color: rgba(27,36,32,0.6);
+  }
+  hr.rule{
+    border:none;
+    border-top:1px solid var(--line);
+    margin: 20px 0;
+  }
+
+  .legend-dot{
+    display:inline-block;
+    width:10px;height:10px;
+    border-radius:50%;
+    margin-right:6px;
+    vertical-align:middle;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>¿Dónde fue tomada?</h1>
+  <p>Subí una foto con datos de ubicación y marcá en el mapa el punto exacto donde creés que fue tomada.</p>
+</header>
+
+<div class="stage" id="stage">
+
+  <div class="dropzone" id="dropzone">
+    <div class="sans" style="font-size:12px;letter-spacing:0.08em;color:rgba(244,239,226,0.5);">PASO 1</div>
+    <div style="font-size:20px;margin-top:6px;">Elegí una fotografía con geoetiquetado GPS</div>
+    <input type="file" id="fileInput" accept="image/*" style="display:none;">
+    <button class="btn" id="chooseBtn">Elegir foto</button>
+    <p class="hint">Debe tener metadatos EXIF con coordenadas (fotos tomadas con GPS activado en el celular). No se sube a ningún servidor: todo se procesa en tu navegador.</p>
+    <div id="uploadError"></div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const chooseBtn = document.getElementById('chooseBtn');
+  const stage = document.getElementById('stage');
+  const uploadError = document.getElementById('uploadError');
+
+  let actualLat = null, actualLng = null, imgDataUrl = null;
+  let map, guessMarker, actualMarker, line;
+  let guessed = false;
+
+  chooseBtn.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('click', (e) => { if(e.target === chooseBtn) return; fileInput.click(); });
+
+  ['dragenter','dragover'].forEach(evt => dropzone.addEventListener(evt, e => {
+    e.preventDefault(); dropzone.classList.add('drag');
+  }));
+  ['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e => {
+    e.preventDefault(); dropzone.classList.remove('drag');
+  }));
+  dropzone.addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if(f) handleFile(f);
+  });
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if(f) handleFile(f);
+  });
+
+  function toDecimal(gpsData, ref){
+    if(!gpsData) return null;
+    let val = gpsData[0] + gpsData[1]/60 + gpsData[2]/3600;
+    if(ref === 'S' || ref === 'W') val = -val;
+    return val;
+  }
+
+  function handleFile(file){
+    uploadError.innerHTML = '';
+    if(!file.type.startsWith('image/')){
+      uploadError.innerHTML = '<p class="error-msg">Ese archivo no es una imagen.</p>';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e){
+      imgDataUrl = e.target.result;
+      EXIF.getData(file, function(){
+        const lat = EXIF.getTag(this, 'GPSLatitude');
+        const latRef = EXIF.getTag(this, 'GPSLatitudeRef');
+        const lng = EXIF.getTag(this, 'GPSLongitude');
+        const lngRef = EXIF.getTag(this, 'GPSLongitudeRef');
+
+        if(!lat || !lng){
+          uploadError.innerHTML = '<p class="error-msg">No encontramos coordenadas GPS en esta foto. Probá con otra que tenga geoetiquetado (revisá que la ubicación estuviera activada al sacarla, y que no se haya perdido el EXIF al comprimirla/compartirla).</p>';
+          return;
+        }
+        actualLat = toDecimal(lat, latRef);
+        actualLng = toDecimal(lng, lngRef);
+        startGame();
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function startGame(){
+    guessed = false;
+    stage.innerHTML = `
+      <div class="game-grid">
+        <div class="panel photo-panel">
+          <div class="panel-label"><span>LA FOTOGRAFÍA</span><span>PASO 2</span></div>
+          <img src="${imgDataUrl}" alt="Foto a ubicar">
+        </div>
+        <div class="panel">
+          <div class="panel-label"><span>TU CÁLCULO</span><span>Tocá el mapa para marcar</span></div>
+          <div id="map"></div>
+        </div>
+      </div>
+      <div class="action-row">
+        <div class="coord-readout sans" id="coordReadout">Todavía no marcaste ningún punto.</div>
+        <div>
+          <button class="btn ghost sans" id="resetBtn">Otra foto</button>
+          <button class="btn sans" id="confirmBtn" disabled>Confirmar ubicación</button>
+        </div>
+      </div>
+      <div id="resultArea"></div>
+    `;
+
+    document.getElementById('resetBtn').addEventListener('click', resetAll);
+    document.getElementById('confirmBtn').addEventListener('click', confirmGuess);
+
+    map = L.map('map', { worldCopyJump:true }).setView([20,0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 18
+    }).addTo(map);
+
+    let guessLatLng = null;
+
+    map.on('click', function(e){
+      if(guessed) return;
+      guessLatLng = e.latlng;
+      if(guessMarker) map.removeLayer(guessMarker);
+      guessMarker = L.circleMarker(e.latlng, {
+        radius: 8, color:'#a13a2f', weight:2, fillColor:'#a13a2f', fillOpacity:0.85
+      }).addTo(map);
+      document.getElementById('coordReadout').innerHTML =
+        `Marcaste: <b>${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}</b>`;
+      document.getElementById('confirmBtn').disabled = false;
+    });
+
+    window.__confirmGuess = function(){
+      if(!guessLatLng || guessed) return;
+      guessed = true;
+      revealResult(guessLatLng);
+    };
+  }
+
+  function confirmGuess(){
+    if(window.__confirmGuess) window.__confirmGuess();
+  }
+
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371; // km
+    const dLat = (lat2-lat1) * Math.PI/180;
+    const dLon = (lon2-lon1) * Math.PI/180;
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
+              Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  function scoreFromDistance(km){
+    // 100 puntos si acierta casi exacto, decae exponencialmente.
+    // ~50 pts a los 750km, ~10 pts a los 2500km aprox.
+    const score = 100 * Math.exp(-km / 900);
+    return Math.max(0, Math.round(score));
+  }
+
+  function verdictFor(score){
+    if(score >= 95) return 'Puntería de otro planeta.';
+    if(score >= 80) return 'Muy cerca del lugar real.';
+    if(score >= 55) return 'Buen intento, en la región correcta.';
+    if(score >= 30) return 'Anduviste lejos, pero no perdido.';
+    if(score >= 10) return 'Bastante lejos del lugar real.';
+    return 'Totalmente errado. La próxima, mejor suerte.';
+  }
+
+  function revealResult(guessLatLng){
+    const distKm = haversine(guessLatLng.lat, guessLatLng.lng, actualLat, actualLng);
+    const score = scoreFromDistance(distKm);
+
+    actualMarker = L.circleMarker([actualLat, actualLng], {
+      radius: 8, color:'#2f4a3d', weight:2, fillColor:'#2f4a3d', fillOpacity:0.9
+    }).addTo(map).bindPopup('Ubicación real').openPopup();
+
+    line = L.polyline([guessLatLng, [actualLat, actualLng]], {
+      color:'#a9762f', weight:2, dashArray:'6,6'
+    }).addTo(map);
+
+    const bounds = L.latLngBounds([guessLatLng, [actualLat, actualLng]]);
+    map.fitBounds(bounds, { padding:[60,60] });
+
+    const distLabel = distKm < 1
+      ? `${Math.round(distKm*1000)} m`
+      : `${distKm < 10 ? distKm.toFixed(1) : Math.round(distKm)} km`;
+
+    document.getElementById('resultArea').innerHTML = `
+      <div class="result-wrap">
+        <div class="score-label sans">PUNTAJE</div>
+        <div class="score-big">${score}<span style="font-size:26px;color:rgba(47,74,61,0.5);">/100</span></div>
+        <div class="distance-line">Estuviste a <b>${distLabel}</b> del lugar real.</div>
+        <div class="verdict">${verdictFor(score)}</div>
+        <hr class="rule">
+        <div class="sans" style="font-size:13px;color:rgba(27,36,32,0.55);">
+          <span class="legend-dot" style="background:#a13a2f;"></span>Tu marca
+          &nbsp;&nbsp;
+          <span class="legend-dot" style="background:#2f4a3d;"></span>Ubicación real
+        </div>
+        <button class="btn sans" id="playAgainBtn" style="margin-top:18px;">Probar con otra foto</button>
+      </div>
+    `;
+    document.getElementById('confirmBtn').disabled = true;
+    document.getElementById('playAgainBtn').addEventListener('click', resetAll);
+  }
+
+  function resetAll(){
+    actualLat = null; actualLng = null; imgDataUrl = null;
+    fileInput.value = '';
+    stage.innerHTML = `
+      <div class="dropzone" id="dropzone2">
+        <div class="sans" style="font-size:12px;letter-spacing:0.08em;color:rgba(244,239,226,0.5);">PASO 1</div>
+        <div style="font-size:20px;margin-top:6px;">Elegí una fotografía con geoetiquetado GPS</div>
+        <button class="btn" id="chooseBtn2">Elegir foto</button>
+        <p class="hint">Debe tener metadatos EXIF con coordenadas (fotos tomadas con GPS activado en el celular). No se sube a ningún servidor: todo se procesa en tu navegador.</p>
+        <div id="uploadError2"></div>
+      </div>
+    `;
+    document.getElementById('chooseBtn2').addEventListener('click', () => fileInput.click());
+  }
+
+})();
+</script>
+
+</body>
+</html>
