@@ -307,6 +307,12 @@
 
     function handleFiles(list){ Array.from(list).forEach(processFile); }
 
+    async function hashFile(file){
+      const buf = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buf);
+      return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+
     function processFile(file){
       if(!file.type.startsWith('image/')) return;
       const row = document.createElement('div');
@@ -327,28 +333,38 @@
         if(!isFinite(decLat) || !isFinite(decLng) || decLat < -90 || decLat > 90 || decLng < -180 || decLng > 180){
           statusEl.textContent = 'GPS ilegible — rechazada'; statusEl.className = 'status err'; return;
         }
-        statusEl.textContent = 'comprimiendo…';
-        compressImage(file, orientation)
-          .then(compressed => {
-            statusEl.textContent = 'subiendo…';
-            uploadFile(compressed, decLat, decLng, statusEl);
-          })
-          .catch(() => {
-            // si la compresión falla por algún motivo, subimos el original igual
-            statusEl.textContent = 'subiendo…';
-            uploadFile(file, decLat, decLng, statusEl);
-          });
+        hashFile(file).then(hash => {
+          statusEl.textContent = 'comprimiendo…';
+          compressImage(file, orientation)
+            .then(compressed => {
+              statusEl.textContent = 'subiendo…';
+              uploadFile(compressed, decLat, decLng, hash, statusEl);
+            })
+            .catch(() => {
+              // si la compresión falla por algún motivo, subimos el original igual
+              statusEl.textContent = 'subiendo…';
+              uploadFile(file, decLat, decLng, hash, statusEl);
+            });
+        });
       });
     }
 
-    async function uploadFile(file, lat, lng, statusEl){
+    async function uploadFile(file, lat, lng, fileHash, statusEl){
+      const ext = (file.name.split('.').pop()||'jpg').toLowerCase();
+      const path = `${group.id}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
       try{
-        const ext = (file.name.split('.').pop()||'jpg').toLowerCase();
-        const path = `${group.id}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
         const { error: upErr } = await sb.storage.from(BUCKET).upload(path, file, { cacheControl:'31536000', upsert:false, contentType:file.type });
         if(upErr) throw upErr;
-        const { error: dbErr } = await sb.from('fg_photos').insert({ group_id: group.id, storage_path: path, lat, lng, uploaded_by: session.user.id });
-        if(dbErr) throw dbErr;
+        const { error: dbErr } = await sb.from('fg_photos').insert({ group_id: group.id, storage_path: path, lat, lng, file_hash: fileHash, uploaded_by: session.user.id });
+        if(dbErr){
+          if(dbErr.code === '23505'){
+            // hash duplicado: ya existía esta misma foto en el grupo. Borramos el archivo recién subido.
+            await sb.storage.from(BUCKET).remove([path]);
+            statusEl.textContent = 'ya estaba cargada — duplicada'; statusEl.className = 'status err';
+            return;
+          }
+          throw dbErr;
+        }
         statusEl.textContent = 'cargada ✓'; statusEl.className = 'status ok';
       }catch(e){
         statusEl.textContent = 'error: ' + (e.message||'no se pudo subir'); statusEl.className = 'status err';
